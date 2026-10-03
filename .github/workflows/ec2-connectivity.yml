@@ -16,22 +16,25 @@ jobs:
 
     steps:
 
-      # ==========================================================
-      # 1. CONNECT TO EC2 AND CHECK KAFKA
-      # ==========================================================
+      # ============================================================
+      # STEP 1 - CONNECT TO BROKER 1
+      # ============================================================
 
       - name: Connect to Kafka Broker 1
         id: kafka
         uses: appleboy/ssh-action@v1.2.2
-
         with:
+
           host: ${{ secrets.SSH_HOST }}
+
           username: ${{ secrets.SSH_USERNAME }}
+
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
+
           command_timeout: 5m
 
           capture_stdout: true
@@ -39,7 +42,7 @@ jobs:
           script: |
 
             echo "=================================================="
-            echo "        KAFKA BROKER 1 HEALTH CHECK"
+            echo "       KAFKA BROKER 1 HEALTH CHECK"
             echo "=================================================="
 
             KAFKA_HOME="/home/ec2-user/kafka"
@@ -69,29 +72,25 @@ jobs:
             uptime
 
 
-            # ==================================================
+            # ======================================================
             # KAFKA CLI
-            # ==================================================
+            # ======================================================
 
             echo ""
             echo "KAFKA CLI"
             echo "--------------------------------------------------"
 
             if [ -f "$KAFKA_BIN/kafka-topics.sh" ]; then
-
               echo "KAFKA_CLI_STATUS=PASS"
-
             else
-
               echo "KAFKA_CLI_STATUS=FAIL"
               exit 1
-
             fi
 
 
-            # ==================================================
+            # ======================================================
             # KAFKA PROCESS
-            # ==================================================
+            # ======================================================
 
             echo ""
             echo "KAFKA PROCESS"
@@ -100,64 +99,49 @@ jobs:
             KAFKA_PROCESS=$(pgrep -af "kafka.Kafka" | head -1 || true)
 
             if [ -n "$KAFKA_PROCESS" ]; then
-
               echo "KAFKA_PROCESS_STATUS=RUNNING"
-
-              echo ""
-              echo "Process:"
-              echo "$KAFKA_PROCESS"
-
+              echo "KAFKA_PROCESS=$KAFKA_PROCESS"
             else
-
               echo "KAFKA_PROCESS_STATUS=NOT_RUNNING"
               exit 1
-
             fi
 
 
-            # ==================================================
+            # ======================================================
             # PORT 9092
-            # ==================================================
+            # ======================================================
 
             echo ""
             echo "PORT 9092"
             echo "--------------------------------------------------"
 
             if ss -lnt | grep -q ':9092 '; then
-
               echo "PORT_9092_STATUS=LISTENING"
-
             else
-
               echo "PORT_9092_STATUS=NOT_LISTENING"
               exit 1
-
             fi
 
 
-            # ==================================================
+            # ======================================================
             # PORT 19092
-            # ==================================================
+            # ======================================================
 
             echo ""
             echo "PORT 19092"
             echo "--------------------------------------------------"
 
             if ss -lnt | grep -q ':19092 '; then
-
               echo "PORT_19092_STATUS=LISTENING"
-
             else
-
               echo "PORT_19092_STATUS=NOT_LISTENING"
               exit 1
-
             fi
 
 
-            # ==================================================
+            # ======================================================
             # KAFKA CONNECTIVITY
-            # ==================================================
+            # ======================================================
 
             echo ""
             echo "KAFKA CONNECTIVITY"
@@ -178,25 +162,19 @@ jobs:
             KAFKA_EXIT=$?
 
             if [ "$KAFKA_EXIT" -eq 0 ]; then
-
               echo "KAFKA_CONNECTIVITY_STATUS=SUCCESS"
-
             else
-
               echo "KAFKA_CONNECTIVITY_STATUS=FAILED"
-
               echo ""
-              echo "Kafka error:"
+              echo "KAFKA_ERROR:"
               echo "$TOPICS"
-
               exit 1
-
             fi
 
 
-            # ==================================================
+            # ======================================================
             # TOPICS
-            # ==================================================
+            # ======================================================
 
             echo ""
             echo "KAFKA_TOPICS"
@@ -205,9 +183,9 @@ jobs:
             echo "$TOPICS"
 
 
-            # ==================================================
+            # ======================================================
             # TOPIC COUNT
-            # ==================================================
+            # ======================================================
 
             TOPIC_COUNT=$(
               echo "$TOPICS" |
@@ -219,13 +197,13 @@ jobs:
             echo "TOPIC_COUNT=$TOPIC_COUNT"
 
 
-            # ==================================================
+            # ======================================================
             # FINAL RESULT
-            # ==================================================
+            # ======================================================
 
             echo ""
             echo "=================================================="
-            echo "KAFKA HEALTH CHECK PASSED"
+            echo "       KAFKA HEALTH CHECK PASSED"
             echo "=================================================="
 
             echo "EC2_STATUS=PASS"
@@ -239,16 +217,14 @@ jobs:
             echo "=================================================="
 
 
-      # ==========================================================
-      # 2. CREATE LOCAL REPORT
-      # ==========================================================
+      # ============================================================
+      # STEP 2 - CREATE REPORT
+      # ============================================================
 
       - name: Create Kafka Health Report
         if: always()
-
         env:
           SSH_OUTPUT: ${{ steps.kafka.outputs.stdout }}
-
         run: |
 
           echo "$SSH_OUTPUT" > kafka-broker-1-health-report.txt
@@ -261,41 +237,27 @@ jobs:
           cat kafka-broker-1-health-report.txt
 
 
-      # ==========================================================
-      # 3. CREATE GITHUB ACTIONS SUMMARY
-      # ==========================================================
+      # ============================================================
+      # STEP 3 - GITHUB SUMMARY
+      # ============================================================
 
       - name: Create GitHub Dashboard
         if: always()
-
         env:
           SSH_OUTPUT: ${{ steps.kafka.outputs.stdout }}
-
         run: |
 
-          TOPIC_COUNT=$(echo "$SSH_OUTPUT" |
-            grep "^TOPIC_COUNT=" |
-            cut -d= -f2)
+          TOPIC_COUNT=$(echo "$SSH_OUTPUT" | grep "^TOPIC_COUNT=" | cut -d= -f2)
 
-          KAFKA_CLI=$(echo "$SSH_OUTPUT" |
-            grep "^KAFKA_CLI_STATUS=" |
-            cut -d= -f2)
+          KAFKA_CLI=$(echo "$SSH_OUTPUT" | grep "^KAFKA_CLI_STATUS=" | cut -d= -f2)
 
-          KAFKA_PROCESS=$(echo "$SSH_OUTPUT" |
-            grep "^KAFKA_PROCESS_STATUS=" |
-            cut -d= -f2)
+          KAFKA_PROCESS=$(echo "$SSH_OUTPUT" | grep "^KAFKA_PROCESS_STATUS=" | cut -d= -f2)
 
-          PORT_9092=$(echo "$SSH_OUTPUT" |
-            grep "^PORT_9092_STATUS=" |
-            cut -d= -f2)
+          PORT_9092=$(echo "$SSH_OUTPUT" | grep "^PORT_9092_STATUS=" | cut -d= -f2)
 
-          PORT_19092=$(echo "$SSH_OUTPUT" |
-            grep "^PORT_19092_STATUS=" |
-            cut -d= -f2)
+          PORT_19092=$(echo "$SSH_OUTPUT" | grep "^PORT_19092_STATUS=" | cut -d= -f2)
 
-          KAFKA_CONNECTIVITY=$(echo "$SSH_OUTPUT" |
-            grep "^KAFKA_CONNECTIVITY_STATUS=" |
-            cut -d= -f2)
+          KAFKA_CONNECTIVITY=$(echo "$SSH_OUTPUT" | grep "^KAFKA_CONNECTIVITY_STATUS=" | cut -d= -f2)
 
 
           if [ "$KAFKA_CLI" = "PASS" ]; then
@@ -329,217 +291,223 @@ jobs:
           fi
 
 
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          echo "# 🚀 Kafka Platform Health Dashboard" >> "$GITHUB_STEP_SUMMARY"
 
-          # 🚀 Kafka Platform Health Dashboard
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ## 🟢 Broker 1 Health
+          echo "## 🟢 Broker 1 Health" >> "$GITHUB_STEP_SUMMARY"
 
-          | Component | Status |
-          |---|---|
-          | 🔐 EC2 SSH | 🟢 CONNECTED |
-          | 📦 Kafka CLI | $CLI_ICON $KAFKA_CLI |
-          | ⚙️ Kafka Process | $PROCESS_ICON $KAFKA_PROCESS |
-          | 🔌 Port 9092 | $PORT_9092_ICON $PORT_9092 |
-          | 🔌 Port 19092 | $PORT_19092_ICON $PORT_19092 |
-          | 🔗 Kafka Connectivity | $KAFKA_ICON $KAFKA_CONNECTIVITY |
-          | 📊 Kafka Topics | 🟢 **$TOPIC_COUNT** |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ---
+          echo "| Component | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🔐 EC2 SSH | 🟢 CONNECTED |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 📦 Kafka CLI | $CLI_ICON $KAFKA_CLI |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ⚙️ Kafka Process | $PROCESS_ICON $KAFKA_PROCESS |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🔌 Port 9092 | $PORT_9092_ICON $PORT_9092 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🔌 Port 19092 | $PORT_19092_ICON $PORT_19092 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🔗 Kafka Connectivity | $KAFKA_ICON $KAFKA_CONNECTIVITY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 📊 Kafka Topics | 🟢 **$TOPIC_COUNT** |" >> "$GITHUB_STEP_SUMMARY"
 
-          ## 🖥️ EC2 / Kafka Information
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          | Property | Value |
-          |---|---|
-          | Broker | \`broker1\` |
-          | Private IP | \`172.31.36.36\` |
-          | Kafka Home | \`/home/ec2-user/kafka\` |
-          | Bootstrap Server | \`172.31.36.36:9092\` |
-          | Kafka Mode | \`KRaft\` |
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
 
-          ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ## 🔗 CI Connectivity
+          echo "## 🖥️ EC2 / Kafka Information" >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`text
-          
-                         GITHUB
-                            |
-                            |
-                    GitHub Actions
-                            |
-                            | SSH :22
-                            |
-                            v
-                +-----------------------+
-                |       AWS EC2         |
-                |       BROKER 1        |
-                |     172.31.36.36      |
-                +-----------+-----------+
-                            |
-                            |
-                       Kafka Process
-                            |
-                   +--------+--------+
-                   |                 |
-                   v                 v
-              Port 9092        Port 19092
-                   |                 |
-                   +--------+--------+
-                            |
-                            v
-                       Apache Kafka
-                            |
-                            v
-                     KRaft Cluster
-          \`\`\`
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ---
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Broker | \`broker1\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Private IP | \`172.31.36.36\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Kafka Home | \`/home/ec2-user/kafka\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Bootstrap Server | \`172.31.36.36:9092\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Kafka Mode | \`KRaft\` |" >> "$GITHUB_STEP_SUMMARY"
 
-          ## 🏗️ Kafka KRaft Architecture
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`text
-                            AWS VPC
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
 
-              +-------------------------------+
-              |                               |
-              |        KAFKA CLUSTER          |
-              |                               |
-              |  +-------------------------+  |
-              |  |       BROKER 1          |  |
-              |  |     172.31.36.36        |  |
-              |  +------------+------------+  |
-              |               |               |
-              |  +------------+------------+  |
-              |  |       BROKER 2          |  |
-              |  |     172.31.42.7         |  |
-              |  +------------+------------+  |
-              |               |               |
-              |              KRaft            |
-              |               |               |
-              |       +-------+-------+       |
-              |       |               |       |
-              |       v               v       |
-              |  +---------+     +---------+ |
-              |  | CTRL 1  |     | CTRL 2  | |
-              |  |172.31.35.220| |172.31.34.34| |
-              |  +---------+     +---------+ |
-              |                               |
-              +-------------------------------+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`
+          echo "## 🔗 CI Connectivity" >> "$GITHUB_STEP_SUMMARY"
 
-          ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ## 🔄 CI/CD Pipeline
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo '                 GITHUB' >> "$GITHUB_STEP_SUMMARY"
+          echo '                    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '                    v' >> "$GITHUB_STEP_SUMMARY"
+          echo '             GitHub Actions' >> "$GITHUB_STEP_SUMMARY"
+          echo '                    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '                    | SSH :22' >> "$GITHUB_STEP_SUMMARY"
+          echo '                    v' >> "$GITHUB_STEP_SUMMARY"
+          echo '          +-----------------------+' >> "$GITHUB_STEP_SUMMARY"
+          echo '          |       AWS EC2         |' >> "$GITHUB_STEP_SUMMARY"
+          echo '          |       BROKER 1        |' >> "$GITHUB_STEP_SUMMARY"
+          echo '          |     172.31.36.36      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '          +-----------+-----------+' >> "$GITHUB_STEP_SUMMARY"
+          echo '                      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '                      v' >> "$GITHUB_STEP_SUMMARY"
+          echo '                Apache Kafka' >> "$GITHUB_STEP_SUMMARY"
+          echo '                      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '                      v' >> "$GITHUB_STEP_SUMMARY"
+          echo '                 KRaft Cluster' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`text
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          👨‍💻 Developer
-                 |
-                 v
-          📦 GitHub Repository
-                 |
-                 v
-          ⚙️ GitHub Actions
-                 |
-                 v
-          🔐 SSH Authentication
-                 |
-                 v
-          ☁️ AWS EC2
-                 |
-                 v
-          🖥️ Kafka Broker 1
-                 |
-          +------+------+
-          |             |
-          v             v
-       Process        Ports
-          |             |
-          +------+------+
-                 |
-                 v
-          🔗 Kafka Connectivity
-                 |
-                 v
-          📊 Topic Discovery
-                 |
-                 v
-          📈 Topic Count
-                 |
-                 v
-          📋 Health Report
-                 |
-          +------+------+
-          |             |
-          v             v
-       Job Logs      Summary
-                         |
-                         v
-                      Artifact
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ---
+          echo "## 🏗️ Kafka KRaft Architecture" >> "$GITHUB_STEP_SUMMARY"
 
-          ## 📊 Kafka Topics
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          The topic list below is collected directly from Kafka during this
-          GitHub Actions execution.
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo '                     AWS VPC' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '       +-------------------------------+' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |        KAFKA CLUSTER          |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |                               |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  +-------------------------+  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  |       BROKER 1          |  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  |     172.31.36.36        |  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  +------------+------------+  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |               |               |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  +------------+------------+  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  |       BROKER 2          |  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  |     172.31.42.7         |  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |  +------------+------------+  |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |               |               |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |              KRaft            |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |               |               |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |        +------+-------+       |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |        |              |       |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |        v              v       |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |   +---------+    +---------+ |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |   | CTRL 1  |    | CTRL 2  | |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |   |172.31.35.220| |172.31.34.34| |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       |   +---------+    +---------+ |' >> "$GITHUB_STEP_SUMMARY"
+          echo '       +-------------------------------+' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`text
-          $(echo "$SSH_OUTPUT" | sed -n '/^KAFKA_TOPICS$/,/^TOPIC_COUNT=/p' | sed '$d')
-          \`\`\`
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          **Total Topics: $TOPIC_COUNT**
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
 
-          ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ## 🎯 CI/CD Progression
+          echo "## 🔄 CI/CD Pipeline" >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`text
-          
-          ✅ EC2 CONNECTIVITY
-                  |
-                  v
-          ✅ KAFKA HEALTH CHECK
-                  |
-                  v
-          🎯 CREATE TOPIC
-                  |
-                  v
-          🎯 ALTER TOPIC
-                  |
-                  v
-          🎯 TOPIC-AS-CODE
-                  |
-                  v
-          🎯 ACL-AS-CODE
-                  |
-                  v
-          🎯 SCHEMA CI/CD
-                  |
-                  v
-          🎯 KAFKA CONNECT CI/CD
-                  |
-                  v
-          🚀 ENTERPRISE KAFKA PLATFORM CI/CD
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          \`\`\`
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Developer' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'GitHub Repository' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'GitHub Actions' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'SSH Authentication' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'AWS EC2 Broker 1' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Kafka Process' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Port 9092' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Port 19092' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Kafka Connectivity' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Topic Discovery' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Topic Count' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Health Dashboard' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- GitHub Logs' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Summary' >> "$GITHUB_STEP_SUMMARY"
+          echo '    |' >> "$GITHUB_STEP_SUMMARY"
+          echo '    +---- Artifact' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-          EOF
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## 📊 Kafka Topics" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "$SSH_OUTPUT" |
+            sed -n '/^KAFKA_TOPICS$/,/^TOPIC_COUNT=/p' |
+            sed '$d' >> "$GITHUB_STEP_SUMMARY"
+
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "**Total Topics: $TOPIC_COUNT**" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## 🎯 Next CI/CD Stages" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo 'HEALTH CHECK' >> "$GITHUB_STEP_SUMMARY"
+          echo '      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '      v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'CREATE TOPIC' >> "$GITHUB_STEP_SUMMARY"
+          echo '      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '      v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'ALTER TOPIC' >> "$GITHUB_STEP_SUMMARY"
+          echo '      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '      v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TOPIC-AS-CODE' >> "$GITHUB_STEP_SUMMARY"
+          echo '      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '      v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'ACL-AS-CODE' >> "$GITHUB_STEP_SUMMARY"
+          echo '      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '      v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'SCHEMA CI/CD' >> "$GITHUB_STEP_SUMMARY"
+          echo '      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '      v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'KAFKA CONNECT CI/CD' >> "$GITHUB_STEP_SUMMARY"
+          echo '      |' >> "$GITHUB_STEP_SUMMARY"
+          echo '      v' >> "$GITHUB_STEP_SUMMARY"
+          echo 'ENTERPRISE KAFKA PLATFORM CI/CD' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
 
-      # ==========================================================
-      # 4. UPLOAD REPORT
-      # ==========================================================
+      # ============================================================
+      # STEP 4 - UPLOAD REPORT
+      # ============================================================
 
       - name: Upload Kafka Health Report
         if: always()
-
         uses: actions/upload-artifact@v4
-
         with:
           name: kafka-broker-1-health-report
           path: kafka-broker-1-health-report.txt
