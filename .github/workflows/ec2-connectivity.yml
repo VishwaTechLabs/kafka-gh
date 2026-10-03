@@ -17,56 +17,38 @@ jobs:
     steps:
 
       # ==========================================================
-      # STEP 1
-      # SSH TO BROKER 1 AND RUN ALL KAFKA HEALTH CHECKS
+      # 1. CONNECT TO EC2 AND CHECK KAFKA
       # ==========================================================
 
-      - name: 🔐 Connect to Kafka Broker 1
-        id: kafka_check
-        uses: appleboy/ssh-action@v1
+      - name: Connect to Kafka Broker 1
+        id: kafka
+        uses: appleboy/ssh-action@v1.2.2
+
         with:
-
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
+          command_timeout: 5m
 
-          command_timeout: 10m
+          capture_stdout: true
 
           script: |
 
-            set -uo pipefail
-
-            # ==================================================
-            # VARIABLES
-            # ==================================================
+            echo "=================================================="
+            echo "        KAFKA BROKER 1 HEALTH CHECK"
+            echo "=================================================="
 
             KAFKA_HOME="/home/ec2-user/kafka"
-
             KAFKA_BIN="$KAFKA_HOME/bin"
-
             BOOTSTRAP_SERVER="172.31.36.36:9092"
 
             echo ""
-            echo "============================================================"
-            echo "             🚀 KAFKA BROKER 1 HEALTH CHECK"
-            echo "============================================================"
-            echo ""
-
-            # ==================================================
-            # SERVER INFORMATION
-            # ==================================================
-
-            echo "============================================================"
-            echo "🖥️ SERVER INFORMATION"
-            echo "============================================================"
-
-            echo ""
+            echo "SERVER INFORMATION"
+            echo "--------------------------------------------------"
 
             echo "Hostname:"
             hostname
@@ -86,710 +68,479 @@ jobs:
             echo "Uptime:"
             uptime
 
-            echo ""
 
             # ==================================================
-            # KAFKA INSTALLATION CHECK
+            # KAFKA CLI
             # ==================================================
 
-            echo "============================================================"
-            echo "📦 KAFKA INSTALLATION"
-            echo "============================================================"
-
             echo ""
-
-            echo "Kafka Home:"
-            echo "$KAFKA_HOME"
-
-            echo ""
-
-            echo "Kafka CLI:"
-            echo "$KAFKA_BIN/kafka-topics.sh"
-
-            echo ""
+            echo "KAFKA CLI"
+            echo "--------------------------------------------------"
 
             if [ -f "$KAFKA_BIN/kafka-topics.sh" ]; then
 
-              echo "🟢 Kafka CLI Status: AVAILABLE"
+              echo "KAFKA_CLI_STATUS=PASS"
 
             else
 
-              echo "🔴 Kafka CLI Status: NOT FOUND"
-
+              echo "KAFKA_CLI_STATUS=FAIL"
               exit 1
 
             fi
 
-            echo ""
 
             # ==================================================
-            # KAFKA PROCESS CHECK
+            # KAFKA PROCESS
             # ==================================================
 
-            echo "============================================================"
-            echo "⚙️ KAFKA PROCESS CHECK"
-            echo "============================================================"
-
             echo ""
+            echo "KAFKA PROCESS"
+            echo "--------------------------------------------------"
 
-            KAFKA_PID=$(pgrep -f 'kafka.Kafka' | head -1 || true)
+            KAFKA_PROCESS=$(pgrep -af "kafka.Kafka" | head -1 || true)
 
-            if [ -n "$KAFKA_PID" ]; then
+            if [ -n "$KAFKA_PROCESS" ]; then
 
-              echo "🟢 Kafka Process Status: RUNNING"
-
-              echo ""
-
-              echo "Kafka PID:"
-              echo "$KAFKA_PID"
+              echo "KAFKA_PROCESS_STATUS=RUNNING"
 
               echo ""
-
-              echo "Kafka Process:"
-              ps -fp "$KAFKA_PID" || true
+              echo "Process:"
+              echo "$KAFKA_PROCESS"
 
             else
 
-              echo "🔴 Kafka Process Status: NOT RUNNING"
-
+              echo "KAFKA_PROCESS_STATUS=NOT_RUNNING"
               exit 1
 
             fi
 
-            echo ""
 
             # ==================================================
             # PORT 9092
             # ==================================================
 
-            echo "============================================================"
-            echo "🔌 KAFKA PORT 9092"
-            echo "============================================================"
-
             echo ""
+            echo "PORT 9092"
+            echo "--------------------------------------------------"
 
-            if ss -lnt | grep -q ':9092'; then
+            if ss -lnt | grep -q ':9092 '; then
 
-              echo "🟢 Kafka Port 9092: LISTENING"
+              echo "PORT_9092_STATUS=LISTENING"
 
             else
 
-              echo "🔴 Kafka Port 9092: NOT LISTENING"
-
+              echo "PORT_9092_STATUS=NOT_LISTENING"
               exit 1
 
             fi
 
-            echo ""
 
             # ==================================================
             # PORT 19092
             # ==================================================
 
-            echo "============================================================"
-            echo "🔌 KAFKA PORT 19092"
-            echo "============================================================"
-
             echo ""
+            echo "PORT 19092"
+            echo "--------------------------------------------------"
 
-            if ss -lnt | grep -q ':19092'; then
+            if ss -lnt | grep -q ':19092 '; then
 
-              echo "🟢 Kafka Port 19092: LISTENING"
+              echo "PORT_19092_STATUS=LISTENING"
 
             else
 
-              echo "🔴 Kafka Port 19092: NOT LISTENING"
-
+              echo "PORT_19092_STATUS=NOT_LISTENING"
               exit 1
 
             fi
 
-            echo ""
-
-            # ==================================================
-            # LISTENING PORTS
-            # ==================================================
-
-            echo "============================================================"
-            echo "📡 LISTENING PORTS"
-            echo "============================================================"
-
-            echo ""
-
-            ss -lntp | grep -E ':9092|:19092' || true
-
-            echo ""
 
             # ==================================================
             # KAFKA CONNECTIVITY
             # ==================================================
 
-            echo "============================================================"
-            echo "🔗 KAFKA CONNECTIVITY"
-            echo "============================================================"
-
             echo ""
+            echo "KAFKA CONNECTIVITY"
+            echo "--------------------------------------------------"
 
             echo "Bootstrap Server:"
             echo "$BOOTSTRAP_SERVER"
 
             echo ""
 
-            echo "Testing Kafka..."
-
-            echo ""
-
-            TOPICS_OUTPUT=$(
+            TOPICS=$(
               "$KAFKA_BIN/kafka-topics.sh" \
-              --list \
-              --bootstrap-server "$BOOTSTRAP_SERVER" \
-              2>&1
+                --bootstrap-server "$BOOTSTRAP_SERVER" \
+                --list \
+                2>&1
             )
 
-            KAFKA_EXIT_CODE=$?
+            KAFKA_EXIT=$?
 
-            if [ "$KAFKA_EXIT_CODE" -eq 0 ]; then
+            if [ "$KAFKA_EXIT" -eq 0 ]; then
 
-              echo "🟢 Kafka Connectivity: SUCCESS"
+              echo "KAFKA_CONNECTIVITY_STATUS=SUCCESS"
 
             else
 
-              echo "🔴 Kafka Connectivity: FAILED"
+              echo "KAFKA_CONNECTIVITY_STATUS=FAILED"
 
               echo ""
-
-              echo "Kafka CLI Error:"
-              echo "$TOPICS_OUTPUT"
+              echo "Kafka error:"
+              echo "$TOPICS"
 
               exit 1
 
             fi
 
-            echo ""
 
             # ==================================================
-            # TOPIC LIST
+            # TOPICS
             # ==================================================
 
-            echo "============================================================"
-            echo "📊 KAFKA TOPICS"
-            echo "============================================================"
-
             echo ""
+            echo "KAFKA_TOPICS"
+            echo "--------------------------------------------------"
 
-            echo "$TOPICS_OUTPUT"
+            echo "$TOPICS"
 
-            echo ""
 
             # ==================================================
             # TOPIC COUNT
             # ==================================================
 
             TOPIC_COUNT=$(
-              echo "$TOPICS_OUTPUT" |
+              echo "$TOPICS" |
               sed '/^[[:space:]]*$/d' |
               wc -l
             )
 
-            echo "============================================================"
-            echo "📊 TOPIC COUNT"
-            echo "============================================================"
-
             echo ""
+            echo "TOPIC_COUNT=$TOPIC_COUNT"
 
-            echo "Total Kafka Topics: $TOPIC_COUNT"
-
-            echo ""
-
-            # ==================================================
-            # KAFKA CONFIGURATION
-            # ==================================================
-
-            echo "============================================================"
-            echo "⚙️ KAFKA CONFIGURATION"
-            echo "============================================================"
-
-            echo ""
-
-            if [ -f "$KAFKA_HOME/config/server.properties" ]; then
-
-              echo "🟢 server.properties: FOUND"
-
-            else
-
-              echo "⚠️ server.properties not found at expected location"
-
-            fi
-
-            echo ""
 
             # ==================================================
             # FINAL RESULT
             # ==================================================
 
-            echo "============================================================"
-            echo "🏆 FINAL KAFKA HEALTH RESULT"
-            echo "============================================================"
-
             echo ""
+            echo "=================================================="
+            echo "KAFKA HEALTH CHECK PASSED"
+            echo "=================================================="
 
-            echo "EC2 Connectivity       : 🟢 SUCCESS"
+            echo "EC2_STATUS=PASS"
+            echo "KAFKA_CLI=PASS"
+            echo "KAFKA_PROCESS=RUNNING"
+            echo "PORT_9092=LISTENING"
+            echo "PORT_19092=LISTENING"
+            echo "KAFKA_CONNECTIVITY=SUCCESS"
+            echo "TOPIC_COUNT=$TOPIC_COUNT"
 
-            echo "Kafka CLI              : 🟢 AVAILABLE"
-
-            echo "Kafka Process          : 🟢 RUNNING"
-
-            echo "Port 9092              : 🟢 LISTENING"
-
-            echo "Port 19092             : 🟢 LISTENING"
-
-            echo "Kafka Connectivity     : 🟢 SUCCESS"
-
-            echo "Kafka Topics           : 🟢 $TOPIC_COUNT"
-
-            echo ""
-
-            echo "============================================================"
-            echo "              ✅ KAFKA HEALTH CHECK PASSED"
-            echo "============================================================"
-
-            echo ""
+            echo "=================================================="
 
 
       # ==========================================================
-      # STEP 2
-      # CREATE REPORT ON GITHUB RUNNER
+      # 2. CREATE LOCAL REPORT
       # ==========================================================
 
-      - name: 📄 Create Health Report
+      - name: Create Kafka Health Report
         if: always()
+
+        env:
+          SSH_OUTPUT: ${{ steps.kafka.outputs.stdout }}
+
         run: |
 
-          cat > kafka-broker-1-health-report.txt <<'EOF'
-
-          ============================================================
-                       KAFKA BROKER 1 HEALTH REPORT
-          ============================================================
-
-          Environment:
-          AWS EC2
-
-          Broker:
-          broker1
-
-          Private IP:
-          172.31.36.36
-
-          Kafka Home:
-          /home/ec2-user/kafka
-
-          Bootstrap Server:
-          172.31.36.36:9092
-
-
-          ============================================================
-                       KAFKA HEALTH STATUS
-          ============================================================
-
-          EC2 SSH Connectivity : SUCCESS
-
-          Kafka CLI            : AVAILABLE
-
-          Kafka Process        : RUNNING
-
-          Kafka Port 9092      : LISTENING
-
-          Kafka Port 19092     : LISTENING
-
-          Kafka Connectivity   : SUCCESS
-
-          Kafka Topics         : 10
-
-
-          ============================================================
-                       KAFKA TOPICS
-          ============================================================
-
-          1.  __consumer_offsets
-
-          2.  __oprtr_audit_log
-
-          3.  __oprtr_metric_pt1m
-
-          4.  __oprtr_snapshot_state
-
-          5.  ecommerce-orders
-
-          6.  oprtr.compute.metrics.v2-oprtr_metric_v2_pt1m-changelog
-
-          7.  oprtr.compute.snapshots.v2-oprtr_snaphot_state_v2-changelog
-
-          8.  vishwatech-topic
-
-          9.  vishwatechlabs-topic
-
-          10. vishwatechlabs22-topic
-
-
-          ============================================================
-                       KAFKA ARCHITECTURE
-          ============================================================
-
-                              AWS
-                               |
-                               |
-                        GitHub Actions
-                               |
-                               | SSH
-                               |
-                               v
-                    +----------------------+
-                    |      Broker 1        |
-                    |    broker1            |
-                    | 172.31.36.36         |
-                    |                      |
-                    | Kafka Broker         |
-                    +----------+-----------+
-                               |
-                +--------------+--------------+
-                |                             |
-                v                             v
-
-        +------------------+         +------------------+
-        |    Broker 1      |         |    Broker 2      |
-        | 172.31.36.36     |         | 172.31.42.7     |
-        +--------+---------+         +--------+---------+
-                 |                            |
-                 +-------------+--------------+
-                               |
-                              KRaft
-                               |
-                 +-------------+-------------+
-                 |                           |
-                 v                           v
-
-        +----------------------+    +----------------------+
-        |   Controller 1       |    |   Controller 2       |
-        | 172.31.35.220        |    | 172.31.34.34        |
-        +----------------------+    +----------------------+
-
-
-          ============================================================
-                       CI/CD FLOW
-          ============================================================
-
-          Developer
-              |
-              v
-          GitHub Repository
-              |
-              v
-          GitHub Actions
-              |
-              v
-          SSH Authentication
-              |
-              v
-          AWS EC2 Broker 1
-              |
-              +---- EC2 Connectivity
-              |
-              +---- Kafka Process
-              |
-              +---- Port 9092
-              |
-              +---- Port 19092
-              |
-              +---- Kafka Connectivity
-              |
-              +---- Topic Discovery
-              |
-              +---- Topic Count
-              |
-              v
-          Health Dashboard
-              |
-              +---- GitHub Logs
-              |
-              +---- Job Summary
-              |
-              +---- Artifact
-              |
-              v
-          Kafka Platform CI/CD
-
-
-          ============================================================
-                       END OF REPORT
-          ============================================================
-
-          EOF
+          echo "$SSH_OUTPUT" > kafka-broker-1-health-report.txt
 
           echo ""
-          echo "=============================================="
-          echo "📄 REPORT CREATED"
-          echo "=============================================="
-
-          ls -lh kafka-broker-1-health-report.txt
-
-          echo ""
+          echo "=================================================="
+          echo "KAFKA HEALTH REPORT"
+          echo "=================================================="
 
           cat kafka-broker-1-health-report.txt
 
 
       # ==========================================================
-      # STEP 3
-      # GITHUB ACTIONS VISUAL DASHBOARD
+      # 3. CREATE GITHUB ACTIONS SUMMARY
       # ==========================================================
 
-      - name: 📊 Create GitHub Actions Dashboard
+      - name: Create GitHub Dashboard
         if: always()
+
+        env:
+          SSH_OUTPUT: ${{ steps.kafka.outputs.stdout }}
+
         run: |
 
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          TOPIC_COUNT=$(echo "$SSH_OUTPUT" |
+            grep "^TOPIC_COUNT=" |
+            cut -d= -f2)
+
+          KAFKA_CLI=$(echo "$SSH_OUTPUT" |
+            grep "^KAFKA_CLI_STATUS=" |
+            cut -d= -f2)
+
+          KAFKA_PROCESS=$(echo "$SSH_OUTPUT" |
+            grep "^KAFKA_PROCESS_STATUS=" |
+            cut -d= -f2)
+
+          PORT_9092=$(echo "$SSH_OUTPUT" |
+            grep "^PORT_9092_STATUS=" |
+            cut -d= -f2)
+
+          PORT_19092=$(echo "$SSH_OUTPUT" |
+            grep "^PORT_19092_STATUS=" |
+            cut -d= -f2)
+
+          KAFKA_CONNECTIVITY=$(echo "$SSH_OUTPUT" |
+            grep "^KAFKA_CONNECTIVITY_STATUS=" |
+            cut -d= -f2)
+
+
+          if [ "$KAFKA_CLI" = "PASS" ]; then
+            CLI_ICON="🟢"
+          else
+            CLI_ICON="🔴"
+          fi
+
+          if [ "$KAFKA_PROCESS" = "RUNNING" ]; then
+            PROCESS_ICON="🟢"
+          else
+            PROCESS_ICON="🔴"
+          fi
+
+          if [ "$PORT_9092" = "LISTENING" ]; then
+            PORT_9092_ICON="🟢"
+          else
+            PORT_9092_ICON="🔴"
+          fi
+
+          if [ "$PORT_19092" = "LISTENING" ]; then
+            PORT_19092_ICON="🟢"
+          else
+            PORT_19092_ICON="🔴"
+          fi
+
+          if [ "$KAFKA_CONNECTIVITY" = "SUCCESS" ]; then
+            KAFKA_ICON="🟢"
+          else
+            KAFKA_ICON="🔴"
+          fi
+
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
 
           # 🚀 Kafka Platform Health Dashboard
 
-          ## 🟢 Overall Health
+          ## 🟢 Broker 1 Health
 
           | Component | Status |
           |---|---|
-          | 🔐 EC2 SSH Connectivity | 🟢 **CONNECTED** |
-          | ⚙️ Kafka Process | 🟢 **RUNNING** |
-          | 📦 Kafka CLI | 🟢 **AVAILABLE** |
-          | 🔌 Port 9092 | 🟢 **LISTENING** |
-          | 🔌 Port 19092 | 🟢 **LISTENING** |
-          | 🔗 Kafka Connectivity | 🟢 **SUCCESS** |
-          | 📊 Kafka Topics | 🟢 **10** |
+          | 🔐 EC2 SSH | 🟢 CONNECTED |
+          | 📦 Kafka CLI | $CLI_ICON $KAFKA_CLI |
+          | ⚙️ Kafka Process | $PROCESS_ICON $KAFKA_PROCESS |
+          | 🔌 Port 9092 | $PORT_9092_ICON $PORT_9092 |
+          | 🔌 Port 19092 | $PORT_19092_ICON $PORT_19092 |
+          | 🔗 Kafka Connectivity | $KAFKA_ICON $KAFKA_CONNECTIVITY |
+          | 📊 Kafka Topics | 🟢 **$TOPIC_COUNT** |
 
           ---
 
-          ## 🖥️ Broker Information
+          ## 🖥️ EC2 / Kafka Information
 
           | Property | Value |
           |---|---|
-          | Broker | `broker1` |
-          | Private IP | `172.31.36.36` |
-          | Kafka Home | `/home/ec2-user/kafka` |
-          | Bootstrap Server | `172.31.36.36:9092` |
-          | Kafka Mode | `KRaft` |
+          | Broker | \`broker1\` |
+          | Private IP | \`172.31.36.36\` |
+          | Kafka Home | \`/home/ec2-user/kafka\` |
+          | Bootstrap Server | \`172.31.36.36:9092\` |
+          | Kafka Mode | \`KRaft\` |
 
           ---
 
-          ## 🔌 Connectivity
+          ## 🔗 CI Connectivity
 
-          ```text
+          \`\`\`text
           
                          GITHUB
                             |
                             |
-                     GitHub Actions
+                    GitHub Actions
                             |
                             | SSH :22
                             |
                             v
                 +-----------------------+
                 |       AWS EC2         |
-                |       Broker 1        |
-                |    172.31.36.36       |
+                |       BROKER 1        |
+                |     172.31.36.36      |
                 +-----------+-----------+
                             |
-                  +---------+---------+
-                  |                   |
-                  v                   v
-              Port 9092           Port 19092
-                  |                   |
-                  +---------+---------+
+                            |
+                       Kafka Process
+                            |
+                   +--------+--------+
+                   |                 |
+                   v                 v
+              Port 9092        Port 19092
+                   |                 |
+                   +--------+--------+
                             |
                             v
-                      Apache Kafka
-                      🟢 RUNNING
-          ```
+                       Apache Kafka
+                            |
+                            v
+                     KRaft Cluster
+          \`\`\`
 
           ---
 
-          ## 🏗️ KRaft Cluster Architecture
+          ## 🏗️ Kafka KRaft Architecture
 
-          ```text
+          \`\`\`text
+                            AWS VPC
 
-                           AWS CLOUD
-          =================================================
+              +-------------------------------+
+              |                               |
+              |        KAFKA CLUSTER          |
+              |                               |
+              |  +-------------------------+  |
+              |  |       BROKER 1          |  |
+              |  |     172.31.36.36        |  |
+              |  +------------+------------+  |
+              |               |               |
+              |  +------------+------------+  |
+              |  |       BROKER 2          |  |
+              |  |     172.31.42.7         |  |
+              |  +------------+------------+  |
+              |               |               |
+              |              KRaft            |
+              |               |               |
+              |       +-------+-------+       |
+              |       |               |       |
+              |       v               v       |
+              |  +---------+     +---------+ |
+              |  | CTRL 1  |     | CTRL 2  | |
+              |  |172.31.35.220| |172.31.34.34| |
+              |  +---------+     +---------+ |
+              |                               |
+              +-------------------------------+
 
-                              GitHub
-                                |
-                                v
-                       GitHub Actions
-                                |
-                                | SSH
-                                v
-
-                    +-----------------------+
-                    |       BROKER 1        |
-                    |    172.31.36.36       |
-                    |                       |
-                    |     Kafka Broker      |
-                    +-----------+-----------+
-                                |
-                                |
-                  +-------------+-------------+
-                  |                           |
-                  v                           v
-
-          +--------------------+      +--------------------+
-          |      BROKER 1      |      |      BROKER 2      |
-          |   172.31.36.36     |      |   172.31.42.7      |
-          +----------+---------+      +----------+---------+
-                     |                           |
-                     +-------------+-------------+
-                                   |
-                                  KRaft
-                                   |
-                    +--------------+--------------+
-                    |                             |
-                    v                             v
-
-          +----------------------+     +----------------------+
-          |    CONTROLLER 1      |     |    CONTROLLER 2      |
-          |    172.31.35.220     |     |    172.31.34.34     |
-          +----------------------+     +----------------------+
-
-          =================================================
-          ```
+          \`\`\`
 
           ---
 
           ## 🔄 CI/CD Pipeline
 
-          ```text
+          \`\`\`text
 
           👨‍💻 Developer
-                |
-                v
+                 |
+                 v
           📦 GitHub Repository
-                |
-                v
+                 |
+                 v
           ⚙️ GitHub Actions
-                |
-                v
+                 |
+                 v
           🔐 SSH Authentication
-                |
-                v
+                 |
+                 v
           ☁️ AWS EC2
-                |
-                v
+                 |
+                 v
           🖥️ Kafka Broker 1
-                |
-                +-----------------------------+
-                |                             |
-                v                             v
-          ⚙️ Process Check              🔌 Port Check
-                |                             |
-                +-------------+---------------+
-                              |
-                              v
-                       🔗 Kafka Check
-                              |
-                              v
-                       📊 Topic Check
-                              |
-                              v
-                      📋 Health Report
-                              |
-               +--------------+--------------+
-               |              |              |
-               v              v              v
-          🟢 Job Log    🟢 Summary     📦 Artifact
+                 |
+          +------+------+
+          |             |
+          v             v
+       Process        Ports
+          |             |
+          +------+------+
+                 |
+                 v
+          🔗 Kafka Connectivity
+                 |
+                 v
+          📊 Topic Discovery
+                 |
+                 v
+          📈 Topic Count
+                 |
+                 v
+          📋 Health Report
+                 |
+          +------+------+
+          |             |
+          v             v
+       Job Logs      Summary
+                         |
+                         v
+                      Artifact
 
-          ```
+          \`\`\`
 
           ---
 
           ## 📊 Kafka Topics
 
-          | # | Topic |
-          |---:|---|
-          | 1 | `__consumer_offsets` |
-          | 2 | `__oprtr_audit_log` |
-          | 3 | `__oprtr_metric_pt1m` |
-          | 4 | `__oprtr_snapshot_state` |
-          | 5 | `ecommerce-orders` |
-          | 6 | `oprtr.compute.metrics.v2-oprtr_metric_v2_pt1m-changelog` |
-          | 7 | `oprtr.compute.snapshots.v2-oprtr_snaphot_state_v2-changelog` |
-          | 8 | `vishwatech-topic` |
-          | 9 | `vishwatechlabs-topic` |
-          | 10 | `vishwatechlabs22-topic` |
+          The topic list below is collected directly from Kafka during this
+          GitHub Actions execution.
 
-          **Total Topics: 10**
+          \`\`\`text
+          $(echo "$SSH_OUTPUT" | sed -n '/^KAFKA_TOPICS$/,/^TOPIC_COUNT=/p' | sed '$d')
+          \`\`\`
+
+          **Total Topics: $TOPIC_COUNT**
 
           ---
 
-          ## 🟢 Health Result
+          ## 🎯 CI/CD Progression
 
-          ```text
-          EC2 Connectivity       🟢 PASS
-          Kafka CLI              🟢 PASS
-          Kafka Process          🟢 RUNNING
-          Port 9092              🟢 PASS
-          Port 19092             🟢 PASS
-          Kafka Connectivity     🟢 PASS
-          Topic Discovery        🟢 PASS
-          ```
+          \`\`\`text
+          
+          ✅ EC2 CONNECTIVITY
+                  |
+                  v
+          ✅ KAFKA HEALTH CHECK
+                  |
+                  v
+          🎯 CREATE TOPIC
+                  |
+                  v
+          🎯 ALTER TOPIC
+                  |
+                  v
+          🎯 TOPIC-AS-CODE
+                  |
+                  v
+          🎯 ACL-AS-CODE
+                  |
+                  v
+          🎯 SCHEMA CI/CD
+                  |
+                  v
+          🎯 KAFKA CONNECT CI/CD
+                  |
+                  v
+          🚀 ENTERPRISE KAFKA PLATFORM CI/CD
 
-          ---
-
-          ## 📥 Report
-
-          A complete health report is uploaded as a GitHub Actions artifact.
-
-          **Artifact:** `kafka-broker-1-health-report`
-
-          ---
-
-          ## 🎯 Next CI/CD Stage
-
-          ```text
-          HEALTH CHECK
-               |
-               v
-          CREATE TOPIC
-               |
-               v
-          ALTER TOPIC
-               |
-               v
-          DELETE TOPIC
-               |
-               v
-          ACL MANAGEMENT
-               |
-               v
-          CONFIGURATION MANAGEMENT
-               |
-               v
-          SCHEMA REGISTRY
-               |
-               v
-          KAFKA CONNECT
-               |
-               v
-          PRODUCTION KAFKA PLATFORM CI/CD
-          ```
+          \`\`\`
 
           EOF
 
 
       # ==========================================================
-      # STEP 4
-      # UPLOAD REPORT AS ARTIFACT
+      # 4. UPLOAD REPORT
       # ==========================================================
 
-      - name: 📦 Upload Kafka Health Report
+      - name: Upload Kafka Health Report
         if: always()
+
         uses: actions/upload-artifact@v4
+
         with:
-
           name: kafka-broker-1-health-report
-
           path: kafka-broker-1-health-report.txt
-
           retention-days: 30
