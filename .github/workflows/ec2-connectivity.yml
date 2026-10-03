@@ -1,0 +1,36 @@
+name: EC2 Connectivity Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  connect:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Connect to Kafka Broker 1
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+          script: |
+            echo "================================="
+            echo "Connected to Kafka Broker 1"
+            echo "================================="
+
+            echo "Hostname:"
+            hostname
+
+            echo "User:"
+            whoami
+
+            echo "Private IP:"
+            hostname -I
+
+            echo "Uptime:"
+            uptime
