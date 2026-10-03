@@ -48,8 +48,10 @@ on:
         type: string
         default: "30"
 
+
 permissions:
   contents: read
+
 
 jobs:
 
@@ -59,6 +61,7 @@ jobs:
 
     runs-on: ubuntu-latest
 
+
     steps:
 
       # ============================================================
@@ -66,6 +69,7 @@ jobs:
       # ============================================================
 
       - name: "01 - Validate Inputs"
+        id: validate
 
         env:
           ENVIRONMENT: ${{ inputs.environment }}
@@ -78,61 +82,41 @@ jobs:
 
         run: |
 
+          set -e
+
           echo "=================================================="
           echo "01 - KAFKA CI/CD INPUT VALIDATION"
           echo "=================================================="
 
-          echo ""
-          echo "Environment:"
-          echo "$ENVIRONMENT"
+          echo "Environment        : $ENVIRONMENT"
+          echo "Topic Name         : $TOPIC_NAME"
+          echo "Partitions         : $PARTITIONS"
+          echo "Replication Factor : $REPLICATION_FACTOR"
+          echo "Message Key        : $MESSAGE_KEY"
+          echo "Producer Message   : $PRODUCER_MESSAGE"
+          echo "Consumer Timeout   : $CONSUMER_TIMEOUT seconds"
 
           echo ""
-          echo "Topic Name:"
-          echo "$TOPIC_NAME"
+          echo "Validating inputs..."
 
-          echo ""
-          echo "Partitions:"
-          echo "$PARTITIONS"
-
-          echo ""
-          echo "Replication Factor:"
-          echo "$REPLICATION_FACTOR"
-
-          echo ""
-          echo "Message Key:"
-          echo "$MESSAGE_KEY"
-
-          echo ""
-          echo "Producer Message:"
-          echo "$PRODUCER_MESSAGE"
-
-          echo ""
-          echo "Consumer Timeout:"
-          echo "$CONSUMER_TIMEOUT seconds"
-
-          # --------------------------------------------------------
           # Topic validation
-          # --------------------------------------------------------
-
           if [ -z "$TOPIC_NAME" ]; then
             echo "ERROR: Topic name cannot be empty."
             exit 1
           fi
 
-          if [ ${#TOPIC_NAME} -gt 249 ]; then
+          if [ "${#TOPIC_NAME}" -gt 249 ]; then
             echo "ERROR: Topic name is too long."
             exit 1
           fi
 
           if ! echo "$TOPIC_NAME" | grep -Eq '^[a-zA-Z0-9._-]+$'; then
-            echo "ERROR: Invalid topic name."
+            echo "ERROR: Invalid Kafka topic name."
+            echo "Allowed characters: a-z A-Z 0-9 . _ -"
             exit 1
           fi
 
-          # --------------------------------------------------------
-          # Partitions validation
-          # --------------------------------------------------------
-
+          # Partition validation
           if ! [[ "$PARTITIONS" =~ ^[0-9]+$ ]]; then
             echo "ERROR: Partitions must be numeric."
             exit 1
@@ -143,10 +127,7 @@ jobs:
             exit 1
           fi
 
-          # --------------------------------------------------------
           # Replication validation
-          # --------------------------------------------------------
-
           if ! [[ "$REPLICATION_FACTOR" =~ ^[0-9]+$ ]]; then
             echo "ERROR: Replication factor must be numeric."
             exit 1
@@ -157,33 +138,38 @@ jobs:
             exit 1
           fi
 
-          # Current cluster has 2 brokers
-
+          # Your current lab has 2 brokers
           if [ "$REPLICATION_FACTOR" -gt 2 ]; then
-            echo ""
-            echo "ERROR: Current Kafka cluster has only 2 brokers."
+            echo "ERROR: Current lab has 2 brokers."
             echo "Maximum replication factor is 2."
             exit 1
           fi
 
-          # --------------------------------------------------------
           # Consumer timeout validation
-          # --------------------------------------------------------
-
           if ! [[ "$CONSUMER_TIMEOUT" =~ ^[0-9]+$ ]]; then
             echo "ERROR: Consumer timeout must be numeric."
             exit 1
           fi
 
           if [ "$CONSUMER_TIMEOUT" -lt 5 ]; then
-            echo "ERROR: Consumer timeout should be at least 5 seconds."
+            echo "ERROR: Consumer timeout must be at least 5 seconds."
+            exit 1
+          fi
+
+          # Message validation
+          if [ -z "$MESSAGE_KEY" ]; then
+            echo "ERROR: Message key cannot be empty."
+            exit 1
+          fi
+
+          if [ -z "$PRODUCER_MESSAGE" ]; then
+            echo "ERROR: Producer message cannot be empty."
             exit 1
           fi
 
           echo ""
-          echo "=================================================="
-          echo "INPUT VALIDATION PASSED"
-          echo "=================================================="
+          echo "INPUT_VALIDATION_STATUS=PASS"
+          echo "All inputs are valid."
 
 
       # ============================================================
@@ -191,7 +177,6 @@ jobs:
       # ============================================================
 
       - name: "02 - Kafka Health Check"
-
         id: kafka_health
 
         uses: appleboy/ssh-action@v1.2.2
@@ -199,30 +184,29 @@ jobs:
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
 
           capture_stdout: true
 
           script: |
 
+            set -e
+
+            KAFKA_HOME="/home/ec2-user/kafka"
+            KAFKA_BIN="$KAFKA_HOME/bin"
+
+            BOOTSTRAP_SERVER="172.31.36.36:9092"
+
             echo "=================================================="
             echo "02 - KAFKA HEALTH CHECK"
             echo "=================================================="
 
-            KAFKA_HOME="/home/ec2-user/kafka"
-            KAFKA_BIN="$KAFKA_HOME/bin"
-            BOOTSTRAP_SERVER="172.31.36.36:9092"
-
-            echo ""
             echo "Hostname:"
             hostname
 
@@ -238,89 +222,59 @@ jobs:
             echo "Kafka Home:"
             echo "$KAFKA_HOME"
 
-            # --------------------------------------------------------
-            # Kafka CLI
-            # --------------------------------------------------------
-
             echo ""
-            echo "Kafka CLI:"
+            echo "Checking Kafka CLI..."
 
-            if [ -f "$KAFKA_BIN/kafka-topics.sh" ]; then
-              echo "KAFKA_CLI_STATUS=PASS"
-            else
-              echo "KAFKA_CLI_STATUS=FAIL"
+            if [ ! -f "$KAFKA_BIN/kafka-topics.sh" ]; then
+              echo "KAFKA_CLI_STATUS=FAILED"
               exit 1
             fi
 
-            # --------------------------------------------------------
-            # Kafka process
-            # --------------------------------------------------------
+            echo "KAFKA_CLI_STATUS=PASS"
 
             echo ""
-            echo "Kafka Process:"
+            echo "Checking Kafka process..."
 
-            KAFKA_PROCESS=$(pgrep -af "kafka.Kafka" | head -1 || true)
-
-            if [ -n "$KAFKA_PROCESS" ]; then
-
+            if pgrep -af "kafka.Kafka" | grep -v pgrep >/dev/null; then
               echo "KAFKA_PROCESS_STATUS=RUNNING"
-              echo "$KAFKA_PROCESS"
-
             else
-
-              echo "KAFKA_PROCESS_STATUS=NOT_RUNNING"
+              echo "KAFKA_PROCESS_STATUS=FAILED"
               exit 1
-
             fi
 
-            # --------------------------------------------------------
-            # Port 9092
-            # --------------------------------------------------------
-
             echo ""
-            echo "Port 9092:"
+            echo "Checking port 9092..."
 
             if ss -lnt | grep -q ':9092 '; then
               echo "PORT_9092_STATUS=LISTENING"
             else
-              echo "PORT_9092_STATUS=NOT_LISTENING"
+              echo "PORT_9092_STATUS=FAILED"
               exit 1
             fi
 
-            # --------------------------------------------------------
-            # Port 19092
-            # --------------------------------------------------------
-
             echo ""
-            echo "Port 19092:"
+            echo "Checking port 19092..."
 
             if ss -lnt | grep -q ':19092 '; then
               echo "PORT_19092_STATUS=LISTENING"
             else
-              echo "PORT_19092_STATUS=NOT_LISTENING"
+              echo "PORT_19092_STATUS=FAILED"
               exit 1
             fi
 
-            # --------------------------------------------------------
-            # Kafka connectivity
-            # --------------------------------------------------------
-
             echo ""
-            echo "Kafka Connectivity:"
+            echo "Testing Kafka connectivity..."
 
             "$KAFKA_BIN/kafka-topics.sh" \
               --bootstrap-server "$BOOTSTRAP_SERVER" \
-              --list > /tmp/kafka-topics.txt 2>&1
+              --list \
+              >/tmp/kafka-health-topics.txt
 
-            KAFKA_EXIT=$?
+            echo "KAFKA_CONNECTIVITY_STATUS=SUCCESS"
 
-            if [ "$KAFKA_EXIT" -eq 0 ]; then
-              echo "KAFKA_CONNECTIVITY_STATUS=SUCCESS"
-            else
-              echo "KAFKA_CONNECTIVITY_STATUS=FAILED"
-              cat /tmp/kafka-topics.txt
-              exit 1
-            fi
+            echo ""
+            echo "Kafka topics currently available:"
+            cat /tmp/kafka-health-topics.txt
 
             echo ""
             echo "KAFKA_HEALTH_STATUS=PASS"
@@ -331,7 +285,6 @@ jobs:
       # ============================================================
 
       - name: "03 - Create Topic"
-
         id: create_topic
 
         uses: appleboy/ssh-action@v1.2.2
@@ -339,27 +292,22 @@ jobs:
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
 
           capture_stdout: true
 
           script: |
 
-            echo "=================================================="
-            echo "03 - CREATE KAFKA TOPIC"
-            echo "=================================================="
+            set -e
 
-            KAFKA_HOME="/home/ec2-user/kafka"
-            KAFKA_BIN="$KAFKA_HOME/bin"
+            KAFKA_BIN="/home/ec2-user/kafka/bin"
+
             BOOTSTRAP_SERVER="172.31.36.36:9092"
 
             TOPIC_NAME="${{ inputs.topic_name }}"
@@ -367,58 +315,41 @@ jobs:
             REPLICATION_FACTOR="${{ inputs.replication_factor }}"
             ENVIRONMENT="${{ inputs.environment }}"
 
-            echo ""
-            echo "Environment:"
-            echo "$ENVIRONMENT"
+            echo "=================================================="
+            echo "03 - CREATE KAFKA TOPIC"
+            echo "=================================================="
+
+            echo "Environment        : $ENVIRONMENT"
+            echo "Topic              : $TOPIC_NAME"
+            echo "Partitions         : $PARTITIONS"
+            echo "Replication Factor : $REPLICATION_FACTOR"
 
             echo ""
-            echo "Topic:"
-            echo "$TOPIC_NAME"
-
-            echo ""
-            echo "Partitions:"
-            echo "$PARTITIONS"
-
-            echo ""
-            echo "Replication Factor:"
-            echo "$REPLICATION_FACTOR"
 
             EXISTING_TOPICS=$(
               "$KAFKA_BIN/kafka-topics.sh" \
-              --bootstrap-server "$BOOTSTRAP_SERVER" \
-              --list
+                --bootstrap-server "$BOOTSTRAP_SERVER" \
+                --list
             )
 
             if echo "$EXISTING_TOPICS" | grep -Fxq "$TOPIC_NAME"; then
 
-              echo ""
+              echo "Topic already exists."
+
               echo "TOPIC_STATUS=ALREADY_EXISTS"
 
             else
 
-              echo ""
               echo "Creating topic..."
 
-              CREATE_OUTPUT=$(
-                "$KAFKA_BIN/kafka-topics.sh" \
+              "$KAFKA_BIN/kafka-topics.sh" \
                 --bootstrap-server "$BOOTSTRAP_SERVER" \
                 --create \
                 --topic "$TOPIC_NAME" \
                 --partitions "$PARTITIONS" \
-                --replication-factor "$REPLICATION_FACTOR" \
-                2>&1
-              )
+                --replication-factor "$REPLICATION_FACTOR"
 
-              CREATE_EXIT=$?
-
-              echo "$CREATE_OUTPUT"
-
-              if [ "$CREATE_EXIT" -eq 0 ]; then
-                echo "TOPIC_STATUS=CREATED"
-              else
-                echo "TOPIC_STATUS=CREATE_FAILED"
-                exit 1
-              fi
+              echo "TOPIC_STATUS=CREATED"
 
             fi
 
@@ -428,7 +359,6 @@ jobs:
       # ============================================================
 
       - name: "04 - Verify Topic"
-
         id: verify_topic
 
         uses: appleboy/ssh-action@v1.2.2
@@ -436,22 +366,19 @@ jobs:
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
+
+          capture_stdout: true
 
           script: |
 
-            echo "=================================================="
-            echo "04 - VERIFY TOPIC"
-            echo "=================================================="
+            set -e
 
             KAFKA_BIN="/home/ec2-user/kafka/bin"
 
@@ -459,28 +386,36 @@ jobs:
 
             TOPIC_NAME="${{ inputs.topic_name }}"
 
-            VERIFY_TOPIC=$(
-              "$KAFKA_BIN/kafka-topics.sh" \
-              --bootstrap-server "$BOOTSTRAP_SERVER" \
-              --list |
-              grep -Fx "$TOPIC_NAME" || true
-            )
+            echo "=================================================="
+            echo "04 - VERIFY KAFKA TOPIC"
+            echo "=================================================="
 
-            if [ "$VERIFY_TOPIC" = "$TOPIC_NAME" ]; then
+            echo "Topic:"
+            echo "$TOPIC_NAME"
+
+            echo ""
+
+            if "$KAFKA_BIN/kafka-topics.sh" \
+              --bootstrap-server "$BOOTSTRAP_SERVER" \
+              --list | grep -Fxq "$TOPIC_NAME"; then
 
               echo "TOPIC_VERIFY_STATUS=SUCCESS"
-
-              echo ""
-              echo "Verified Topic:"
-              echo "$VERIFY_TOPIC"
 
             else
 
               echo "TOPIC_VERIFY_STATUS=FAILED"
-
               exit 1
 
             fi
+
+            echo ""
+            echo "Topic details:"
+            echo "--------------------------------------------------"
+
+            "$KAFKA_BIN/kafka-topics.sh" \
+              --bootstrap-server "$BOOTSTRAP_SERVER" \
+              --describe \
+              --topic "$TOPIC_NAME"
 
 
       # ============================================================
@@ -488,7 +423,6 @@ jobs:
       # ============================================================
 
       - name: "05 - Start Consumer"
-
         id: consumer
 
         uses: appleboy/ssh-action@v1.2.2
@@ -496,24 +430,19 @@ jobs:
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
 
           capture_stdout: true
 
           script: |
 
-            echo "=================================================="
-            echo "05 - START KAFKA CONSUMER"
-            echo "=================================================="
+            set -e
 
             KAFKA_BIN="/home/ec2-user/kafka/bin"
 
@@ -523,9 +452,21 @@ jobs:
 
             CONSUMER_TIMEOUT="${{ inputs.consumer_timeout }}"
 
-            CONSUMER_GROUP="github-actions-${GITHUB_RUN_ID}"
+            RUN_ID="${{ github.run_id }}"
 
-            echo ""
+            CONSUMER_GROUP="github-actions-$RUN_ID"
+
+            TEST_FILE="/tmp/kafka-consumer-$RUN_ID.txt"
+
+            PID_FILE="/tmp/kafka-consumer-$RUN_ID.pid"
+
+            rm -f "$TEST_FILE"
+            rm -f "$PID_FILE"
+
+            echo "=================================================="
+            echo "05 - START KAFKA CONSUMER"
+            echo "=================================================="
+
             echo "Topic:"
             echo "$TOPIC_NAME"
 
@@ -534,31 +475,56 @@ jobs:
             echo "$CONSUMER_GROUP"
 
             echo ""
-            echo "Consumer Timeout:"
+            echo "Timeout:"
             echo "$CONSUMER_TIMEOUT seconds"
 
-            rm -f /tmp/kafka-consumer-output.txt
+            echo ""
+            echo "Consumer output file:"
+            echo "$TEST_FILE"
 
             echo ""
-            echo "Starting temporary consumer..."
+            echo "Starting consumer..."
 
-            timeout "${CONSUMER_TIMEOUT}s" \
+            nohup timeout "${CONSUMER_TIMEOUT}s" \
               "$KAFKA_BIN/kafka-console-consumer.sh" \
               --bootstrap-server "$BOOTSTRAP_SERVER" \
               --topic "$TOPIC_NAME" \
               --group "$CONSUMER_GROUP" \
               --from-beginning \
-              > /tmp/kafka-consumer-output.txt 2>&1 &
+              --property print.key=true \
+              --property key.separator=" : " \
+              >"$TEST_FILE" 2>&1 < /dev/null &
 
             CONSUMER_PID=$!
 
-            echo "CONSUMER_PID=$CONSUMER_PID"
+            echo "$CONSUMER_PID" > "$PID_FILE"
 
-            # Give consumer time to join group
+            echo ""
+            echo "Consumer PID:"
+            echo "$CONSUMER_PID"
+
+            echo ""
+            echo "Waiting for consumer startup..."
 
             sleep 5
 
-            echo "CONSUMER_STATUS=STARTED"
+            if kill -0 "$CONSUMER_PID" 2>/dev/null; then
+
+              echo "CONSUMER_PROCESS_STATUS=RUNNING"
+              echo "CONSUMER_STATUS=STARTED"
+
+            else
+
+              echo "CONSUMER_PROCESS_STATUS=FAILED"
+              echo "CONSUMER_STATUS=FAILED"
+
+              echo ""
+              echo "Consumer output:"
+              cat "$TEST_FILE" 2>/dev/null || true
+
+              exit 1
+
+            fi
 
 
       # ============================================================
@@ -566,7 +532,6 @@ jobs:
       # ============================================================
 
       - name: "06 - Produce Message"
-
         id: producer
 
         uses: appleboy/ssh-action@v1.2.2
@@ -574,24 +539,19 @@ jobs:
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
 
           capture_stdout: true
 
           script: |
 
-            echo "=================================================="
-            echo "06 - KAFKA PRODUCER"
-            echo "=================================================="
+            set -e
 
             KAFKA_BIN="/home/ec2-user/kafka/bin"
 
@@ -603,7 +563,10 @@ jobs:
 
             PRODUCER_MESSAGE="${{ inputs.producer_message }}"
 
-            echo ""
+            echo "=================================================="
+            echo "06 - KAFKA PRODUCER"
+            echo "=================================================="
+
             echo "Topic:"
             echo "$TOPIC_NAME"
 
@@ -615,30 +578,35 @@ jobs:
             echo "Producer Message:"
             echo "$PRODUCER_MESSAGE"
 
-            echo ""
+            # IMPORTANT
+            #
+            # Kafka console producer is configured with:
+            #
+            # parse.key=true
+            # key.separator=:
+            #
+            # Therefore the input MUST be:
+            #
+            # key:value
 
-            if printf '%s\n' "$PRODUCER_MESSAGE" |
+            PRODUCER_LINE="$MESSAGE_KEY:$PRODUCER_MESSAGE"
+
+            echo ""
+            echo "Producer Input:"
+            echo "$PRODUCER_LINE"
+
+            echo ""
+            echo "Sending message to Kafka..."
+
+            printf '%s\n' "$PRODUCER_LINE" | \
               "$KAFKA_BIN/kafka-console-producer.sh" \
-              --bootstrap-server "$BOOTSTRAP_SERVER" \
-              --topic "$TOPIC_NAME" \
-              --property "parse.key=true" \
-              --property "key.separator=:"
-            then
-
-              echo ""
-              echo "PRODUCER_STATUS=SUCCESS"
-
-            else
-
-              echo ""
-              echo "PRODUCER_STATUS=FAILED"
-
-              exit 1
-
-            fi
+                --bootstrap-server "$BOOTSTRAP_SERVER" \
+                --topic "$TOPIC_NAME" \
+                --property "parse.key=true" \
+                --property "key.separator=:"
 
             echo ""
-            echo "Message produced successfully."
+            echo "PRODUCER_STATUS=SUCCESS"
 
 
       # ============================================================
@@ -646,7 +614,6 @@ jobs:
       # ============================================================
 
       - name: "07 - Verify Consumer Message"
-
         id: verify_consumer
 
         uses: appleboy/ssh-action@v1.2.2
@@ -654,74 +621,108 @@ jobs:
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
 
+          capture_stdout: true
+
           script: |
+
+            set +e
+
+            RUN_ID="${{ github.run_id }}"
+
+            TEST_FILE="/tmp/kafka-consumer-$RUN_ID.txt"
+
+            PID_FILE="/tmp/kafka-consumer-$RUN_ID.pid"
+
+            PRODUCER_MESSAGE="${{ inputs.producer_message }}"
+
+            MESSAGE_KEY="${{ inputs.message_key }}"
+
+            CONSUMER_TIMEOUT="${{ inputs.consumer_timeout }}"
 
             echo "=================================================="
             echo "07 - VERIFY CONSUMER MESSAGE"
             echo "=================================================="
 
-            TOPIC_NAME="${{ inputs.topic_name }}"
-
-            PRODUCER_MESSAGE="${{ inputs.producer_message }}"
+            echo "Expected Key:"
+            echo "$MESSAGE_KEY"
 
             echo ""
             echo "Expected Message:"
             echo "$PRODUCER_MESSAGE"
 
             echo ""
-            echo "Waiting for consumer..."
+            echo "Consumer File:"
+            echo "$TEST_FILE"
 
-            sleep 5
+            FOUND=0
 
-            if [ -f /tmp/kafka-consumer-output.txt ]; then
+            DEADLINE=$((SECONDS + CONSUMER_TIMEOUT))
 
-              echo ""
-              echo "Consumer Output:"
-              echo "--------------------------------------------------"
+            echo ""
+            echo "Waiting for consumer message..."
 
-              cat /tmp/kafka-consumer-output.txt
+            while [ "$SECONDS" -lt "$DEADLINE" ]; do
 
-              echo "--------------------------------------------------"
+              if [ -f "$TEST_FILE" ]; then
+
+                if grep -Fq -- "$PRODUCER_MESSAGE" "$TEST_FILE"; then
+
+                  FOUND=1
+                  break
+
+                fi
+
+              fi
+
+              sleep 2
+
+            done
+
+            echo ""
+            echo "Consumer Output"
+            echo "=================================================="
+
+            if [ -f "$TEST_FILE" ]; then
+
+              cat "$TEST_FILE"
 
             else
 
-              echo ""
-              echo "ERROR: Consumer output file not found."
-
-              exit 1
+              echo "Consumer output file does not exist."
 
             fi
 
-            if grep -Fq "$PRODUCER_MESSAGE" /tmp/kafka-consumer-output.txt; then
+            echo "=================================================="
 
-              echo ""
+            echo ""
+
+            if [ "$FOUND" -eq 1 ]; then
+
               echo "CONSUMER_STATUS=SUCCESS"
-
               echo "MESSAGE_VERIFICATION=SUCCESS"
 
-              echo ""
-              echo "Message received successfully."
+              if [ -f "$PID_FILE" ]; then
+                kill "$(cat "$PID_FILE")" 2>/dev/null || true
+              fi
+
+              exit 0
 
             else
 
-              echo ""
               echo "CONSUMER_STATUS=FAILED"
-
               echo "MESSAGE_VERIFICATION=FAILED"
 
-              echo ""
-              echo "Expected message was not received."
+              if [ -f "$PID_FILE" ]; then
+                kill "$(cat "$PID_FILE")" 2>/dev/null || true
+              fi
 
               exit 1
 
@@ -733,65 +734,53 @@ jobs:
       # ============================================================
 
       - name: "08 - List Topics"
-
         id: list_topics
+
+        if: always()
 
         uses: appleboy/ssh-action@v1.2.2
 
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
 
           capture_stdout: true
 
           script: |
 
-            echo "=================================================="
-            echo "08 - ALL KAFKA TOPICS"
-            echo "=================================================="
+            set -e
 
             KAFKA_BIN="/home/ec2-user/kafka/bin"
 
             BOOTSTRAP_SERVER="172.31.36.36:9092"
 
+            echo "=================================================="
+            echo "08 - ALL KAFKA TOPICS"
+            echo "=================================================="
+
             ALL_TOPICS=$(
               "$KAFKA_BIN/kafka-topics.sh" \
-              --bootstrap-server "$BOOTSTRAP_SERVER" \
-              --list
+                --bootstrap-server "$BOOTSTRAP_SERVER" \
+                --list
             )
 
-            echo ""
-
-            echo "INDIVIDUAL TOPICS:"
-            echo "--------------------------------------------------"
-
-            while IFS= read -r topic
-            do
-
-              if [ -n "$topic" ]; then
-                echo "TOPIC: $topic"
-              fi
-
-            done <<< "$ALL_TOPICS"
+            echo "$ALL_TOPICS"
 
             TOPIC_COUNT=$(
               echo "$ALL_TOPICS" |
               sed '/^[[:space:]]*$/d' |
-              wc -l
+              wc -l |
+              tr -d ' '
             )
 
             echo ""
-
             echo "TOTAL_TOPIC_COUNT=$TOPIC_COUNT"
 
 
@@ -800,32 +789,28 @@ jobs:
       # ============================================================
 
       - name: "09 - Topic Details"
-
         id: topic_details
+
+        if: always()
 
         uses: appleboy/ssh-action@v1.2.2
 
         with:
 
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USERNAME }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           port: 22
 
           timeout: 30s
-
           command_timeout: 5m
 
           capture_stdout: true
 
           script: |
 
-            echo "=================================================="
-            echo "09 - TOPIC DETAILS"
-            echo "=================================================="
+            set -e
 
             KAFKA_BIN="/home/ec2-user/kafka/bin"
 
@@ -833,7 +818,10 @@ jobs:
 
             TOPIC_NAME="${{ inputs.topic_name }}"
 
-            echo ""
+            echo "=================================================="
+            echo "09 - TOPIC DETAILS"
+            echo "=================================================="
+
             echo "Topic:"
             echo "$TOPIC_NAME"
 
@@ -850,6 +838,7 @@ jobs:
       # ============================================================
 
       - name: "10 - GitHub Dashboard"
+        id: dashboard
 
         if: always()
 
@@ -869,228 +858,564 @@ jobs:
 
           CONSUMER_TIMEOUT: ${{ inputs.consumer_timeout }}
 
-          HEALTH_OUTPUT: ${{ steps.kafka_health.outputs.stdout }}
+          VALIDATION_STATUS: ${{ steps.validate.outcome }}
 
-          PRODUCER_OUTPUT: ${{ steps.producer.outputs.stdout }}
+          HEALTH_STATUS: ${{ steps.kafka_health.outcome }}
 
-          CONSUMER_OUTPUT: ${{ steps.verify_consumer.outputs.stdout }}
+          CREATE_STATUS: ${{ steps.create_topic.outcome }}
+
+          VERIFY_TOPIC_STATUS: ${{ steps.verify_topic.outcome }}
+
+          CONSUMER_STATUS: ${{ steps.consumer.outcome }}
+
+          PRODUCER_STATUS: ${{ steps.producer.outcome }}
+
+          VERIFY_CONSUMER_STATUS: ${{ steps.verify_consumer.outcome }}
+
+          LIST_TOPICS_STATUS: ${{ steps.list_topics.outcome }}
+
+          TOPIC_DETAILS_STATUS: ${{ steps.topic_details.outcome }}
 
           TOPICS_OUTPUT: ${{ steps.list_topics.outputs.stdout }}
 
           DETAILS_OUTPUT: ${{ steps.topic_details.outputs.stdout }}
 
+          VERIFY_OUTPUT: ${{ steps.verify_consumer.outputs.stdout }}
+
+          JOB_STATUS: ${{ job.status }}
+
+
         run: |
 
-          echo "# 🚀 Kafka End-to-End CI/CD Dashboard" >> "$GITHUB_STEP_SUMMARY"
+          set +e
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## 🎯 Runtime Parameters" >> "$GITHUB_STEP_SUMMARY"
+          status_icon() {
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+            case "$1" in
 
-          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Environment | **$ENVIRONMENT** |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Topic | **\`$TOPIC_NAME\`** |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Partitions | **$PARTITIONS** |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Replication Factor | **$REPLICATION_FACTOR** |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Message Key | **\`$MESSAGE_KEY\`** |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Producer Message | **\`$PRODUCER_MESSAGE\`** |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Consumer Timeout | **$CONSUMER_TIMEOUT seconds** |" >> "$GITHUB_STEP_SUMMARY"
+              success)
+                echo "🟢 PASSED"
+                ;;
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+              failure)
+                echo "🔴 FAILED"
+                ;;
 
-          echo "---" >> "$GITHUB_STEP_SUMMARY"
+              skipped)
+                echo "⚪ SKIPPED"
+                ;;
 
-          # ========================================================
-          # PIPELINE STATUS
-          # ========================================================
+              cancelled)
+                echo "🟡 CANCELLED"
+                ;;
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+              *)
+                echo "⚪ UNKNOWN"
+                ;;
 
-          echo "## 🏃 Pipeline Stages" >> "$GITHUB_STEP_SUMMARY"
+            esac
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          }
 
-          echo "| # | Stage | Result |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---:|---|---|" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "| 01 | Validate Inputs | 🟢 PASSED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 02 | Kafka Health Check | 🟢 PASSED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 03 | Create Topic | 🟢 COMPLETED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 04 | Verify Topic | 🟢 COMPLETED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 05 | Start Consumer | 🟢 STARTED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 06 | Produce Message | 🟢 SUCCESS |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 07 | Verify Consumer Message | 🟢 SUCCESS |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 08 | List Topics | 🟢 COMPLETED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 09 | Topic Details | 🟢 COMPLETED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 10 | GitHub Dashboard | 🟢 COMPLETED |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 11 | Upload Report | 🟢 COMPLETED |" >> "$GITHUB_STEP_SUMMARY"
+          echo "Generating GitHub Actions Dashboard..."
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "---" >> "$GITHUB_STEP_SUMMARY"
 
           # ========================================================
-          # PRODUCER / CONSUMER
+          # GITHUB ACTIONS SUMMARY
           # ========================================================
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          {
 
-          echo "## 📨 Producer → Consumer Test" >> "$GITHUB_STEP_SUMMARY"
+            echo "# 🚀 Kafka End-to-End CI/CD"
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo ""
 
-          echo "| Test | Result |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Producer | 🟢 SUCCESS |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Consumer | 🟢 SUCCESS |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Message Verification | 🟢 SUCCESS |" >> "$GITHUB_STEP_SUMMARY"
+            echo "---"
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo ""
 
-          echo "**Message:** \`$PRODUCER_MESSAGE\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "## 🧭 Kafka CI/CD Pipeline"
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo ""
 
-          echo "---" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text'
+
+            echo '                         DEVELOPER'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    GITHUB REPOSITORY'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    GITHUB ACTIONS'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                  01 Validate Inputs'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                 02 Kafka Health Check'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    03 Create Topic'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    04 Verify Topic'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    05 Start Consumer'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    06 Produce Message'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                07 Verify Consumer Message'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    08 List Topics'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    09 Topic Details'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                  10 GitHub Dashboard'
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    11 Upload Report'
+
+            echo ''
+
+            echo '                             |'
+
+            echo '                             v'
+
+            echo '                    AWS EC2 / KAFKA'
+
+            echo ''
+
+            echo '                    +----------------+'
+
+            echo '                    |    BROKER 1     |'
+
+            echo '                    | 172.31.36.36    |'
+
+            echo '                    |     :9092       |'
+
+            echo '                    +----------------+'
+
+            echo '                            |'
+
+            echo '                            |'
+
+            echo '              +-------------+-------------+'
+
+            echo '              |                           |'
+
+            echo '              v                           v'
+
+            echo '       +--------------+            +--------------+'
+
+            echo '       |   BROKER 2   |            | CONTROLLERS  |'
+
+            echo '       +--------------+            +--------------+'
+
+            echo '              \\                           /'
+
+            echo '               \\                         /'
+
+            echo '                +-----------------------+'
+
+            echo '                            |'
+
+            echo '                            v'
+
+            echo '                         KAFKA TOPIC'
+
+            echo '                            |'
+
+            echo '               +------------+------------+'
+
+            echo '               |                         |'
+
+            echo '               v                         v'
+
+            echo '          PRODUCER                  CONSUMER'
+
+            echo '               |                         |'
+
+            echo '               +------ MESSAGE ---------+'
+
+            echo '                            |'
+
+            echo '                            v'
+
+            echo '                  MESSAGE VERIFICATION'
+
+            echo '```'
+
+            echo ""
+
+
+            # ========================================================
+            # RUNTIME PARAMETERS
+            # ========================================================
+
+            echo "## 🎯 Runtime Parameters"
+
+            echo ""
+
+            echo "| Parameter | Value |"
+
+            echo "|---|---|"
+
+            echo "| Environment | **$ENVIRONMENT** |"
+
+            echo "| Topic | **\`$TOPIC_NAME\`** |"
+
+            echo "| Partitions | **$PARTITIONS** |"
+
+            echo "| Replication Factor | **$REPLICATION_FACTOR** |"
+
+            echo "| Message Key | **\`$MESSAGE_KEY\`** |"
+
+            echo "| Producer Message | **\`$PRODUCER_MESSAGE\`** |"
+
+            echo "| Consumer Timeout | **$CONSUMER_TIMEOUT seconds** |"
+
+            echo ""
+
+
+            # ========================================================
+            # PIPELINE STATUS
+            # ========================================================
+
+            echo "## 🏃 Pipeline Execution Status"
+
+            echo ""
+
+            echo "| # | Stage | Status |"
+
+            echo "|---:|---|---|"
+
+            echo "| 01 | Validate Inputs | $(status_icon "$VALIDATION_STATUS") |"
+
+            echo "| 02 | Kafka Health Check | $(status_icon "$HEALTH_STATUS") |"
+
+            echo "| 03 | Create Topic | $(status_icon "$CREATE_STATUS") |"
+
+            echo "| 04 | Verify Topic | $(status_icon "$VERIFY_TOPIC_STATUS") |"
+
+            echo "| 05 | Start Consumer | $(status_icon "$CONSUMER_STATUS") |"
+
+            echo "| 06 | Produce Message | $(status_icon "$PRODUCER_STATUS") |"
+
+            echo "| 07 | Verify Consumer Message | $(status_icon "$VERIFY_CONSUMER_STATUS") |"
+
+            echo "| 08 | List Topics | $(status_icon "$LIST_TOPICS_STATUS") |"
+
+            echo "| 09 | Topic Details | $(status_icon "$TOPIC_DETAILS_STATUS") |"
+
+            echo "| 10 | GitHub Dashboard | 🟢 GENERATED |"
+
+            echo "| 11 | Upload Report | 🟢 READY |"
+
+            echo ""
+
+
+            # ========================================================
+            # PRODUCER / CONSUMER
+            # ========================================================
+
+            echo "## 📨 Producer → Consumer Test"
+
+            echo ""
+
+            echo "| Item | Value |"
+
+            echo "|---|---|"
+
+            echo "| Topic | \`$TOPIC_NAME\` |"
+
+            echo "| Message Key | \`$MESSAGE_KEY\` |"
+
+            echo "| Producer Message | \`$PRODUCER_MESSAGE\` |"
+
+            echo "| Producer | $(status_icon "$PRODUCER_STATUS") |"
+
+            echo "| Consumer | $(status_icon "$CONSUMER_STATUS") |"
+
+            echo "| Message Verification | $(status_icon "$VERIFY_CONSUMER_STATUS") |"
+
+            echo ""
+
+
+            # ========================================================
+            # CONSUMER OUTPUT
+            # ========================================================
+
+            echo "## 📥 Consumer Verification Output"
+
+            echo ""
+
+            echo '```text'
+
+            if [ -n "$VERIFY_OUTPUT" ]; then
+
+              printf '%s\n' "$VERIFY_OUTPUT"
+
+            else
+
+              echo "Consumer verification output unavailable."
+
+            fi
+
+            echo '```'
+
+            echo ""
+
+
+            # ========================================================
+            # KAFKA TOPICS
+            # ========================================================
+
+            echo "## 📊 Kafka Topics"
+
+            echo ""
+
+            if [ -n "$TOPICS_OUTPUT" ]; then
+
+              echo '```text'
+
+              printf '%s\n' "$TOPICS_OUTPUT"
+
+              echo '```'
+
+            else
+
+              echo "Topic listing unavailable."
+
+            fi
+
+            echo ""
+
+
+            # ========================================================
+            # TOPIC DETAILS
+            # ========================================================
+
+            echo "## 🔍 Topic Details"
+
+            echo ""
+
+            if [ -n "$DETAILS_OUTPUT" ]; then
+
+              echo '```text'
+
+              printf '%s\n' "$DETAILS_OUTPUT"
+
+              echo '```'
+
+            else
+
+              echo "Topic details unavailable."
+
+            fi
+
+            echo ""
+
+
+            # ========================================================
+            # CI/CD ROADMAP
+            # ========================================================
+
+            echo "## 🚀 Kafka CI/CD Progression"
+
+            echo ""
+
+            echo '```text'
+
+            echo 'Level 1'
+
+            echo 'Health Check'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'Topic Management'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'Producer / Consumer Testing'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'Level 2'
+
+            echo 'Topic-as-Code'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'ACL-as-Code'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'Level 3'
+
+            echo 'Schema Registry CI/CD'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'Kafka Connect CI/CD'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'Level 4'
+
+            echo 'Terraform + AWS + Kafka'
+
+            echo '     |'
+
+            echo '     v'
+
+            echo 'Enterprise Kafka Platform CI/CD'
+
+            echo '```'
+
+            echo ""
+
+
+            # ========================================================
+            # OVERALL STATUS
+            # ========================================================
+
+            echo "## 📌 Overall Job Status"
+
+            echo ""
+
+            echo "**$JOB_STATUS**"
+
+            echo ""
+
+            echo "---"
+
+            echo ""
+
+            echo "Generated by VishwaTechLabs Kafka CI/CD Pipeline."
+
+          } >> "$GITHUB_STEP_SUMMARY"
+
 
           # ========================================================
-          # TOPIC LIST
+          # CREATE REPORT FOR STAGE 11
           # ========================================================
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          REPORT="kafka-end-to-end-report.txt"
 
-          echo "## 📊 Kafka Topics" >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$REPORT"
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "\`\`\`text" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' \
+            "Kafka End-to-End CI/CD Report" \
+            "========================================" \
+            "" \
+            "Run ID: ${{ github.run_id }}" \
+            "Environment: $ENVIRONMENT" \
+            "Topic: $TOPIC_NAME" \
+            "Partitions: $PARTITIONS" \
+            "Replication Factor: $REPLICATION_FACTOR" \
+            "Message Key: $MESSAGE_KEY" \
+            "Producer Message: $PRODUCER_MESSAGE" \
+            "Consumer Timeout: $CONSUMER_TIMEOUT" \
+            "" \
+            "PIPELINE" \
+            "01 Validate Inputs" \
+            "02 Kafka Health Check" \
+            "03 Create Topic" \
+            "04 Verify Topic" \
+            "05 Start Consumer" \
+            "06 Produce Message" \
+            "07 Verify Consumer Message" \
+            "08 List Topics" \
+            "09 Topic Details" \
+            "10 GitHub Dashboard" \
+            "11 Upload Report" \
+            "" \
+            "STATUS" \
+            "Validate: $VALIDATION_STATUS" \
+            "Health: $HEALTH_STATUS" \
+            "Create Topic: $CREATE_STATUS" \
+            "Verify Topic: $VERIFY_TOPIC_STATUS" \
+            "Consumer: $CONSUMER_STATUS" \
+            "Producer: $PRODUCER_STATUS" \
+            "Consumer Verification: $VERIFY_CONSUMER_STATUS" \
+            "List Topics: $LIST_TOPICS_STATUS" \
+            "Topic Details: $TOPIC_DETAILS_STATUS" \
+            "" \
+            "PRODUCER INPUT" \
+            "$MESSAGE_KEY:$PRODUCER_MESSAGE" \
+            "" \
+            "JOB STATUS" \
+            "$JOB_STATUS" \
+            > "$REPORT"
 
-          echo "$TOPICS_OUTPUT" |
-          grep '^TOPIC: ' >> "$GITHUB_STEP_SUMMARY" || true
 
-          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo ""
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Dashboard generated successfully."
 
-          TOPIC_COUNT=$(echo "$TOPICS_OUTPUT" |
-            grep "^TOTAL_TOPIC_COUNT=" |
-            cut -d= -f2)
-
-          echo "**Total Topics: $TOPIC_COUNT**" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "---" >> "$GITHUB_STEP_SUMMARY"
-
-          # ========================================================
-          # TOPIC DETAILS
-          # ========================================================
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "## 🔍 Topic Details" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "\`\`\`text" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "$DETAILS_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "---" >> "$GITHUB_STEP_SUMMARY"
-
-          # ========================================================
-          # ARCHITECTURE
-          # ========================================================
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "## 🏗️ Kafka CI/CD Architecture" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-
-          echo '                    DEVELOPER' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        v' >> "$GITHUB_STEP_SUMMARY"
-          echo '                 GITHUB REPOSITORY' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        v' >> "$GITHUB_STEP_SUMMARY"
-          echo '                  GITHUB ACTIONS' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        |' >> "$GITHUB_STEP_SUMMARY"
-          echo '              +---------+----------+' >> "$GITHUB_STEP_SUMMARY"
-          echo '              |                    |' >> "$GITHUB_STEP_SUMMARY"
-          echo '              v                    v' >> "$GITHUB_STEP_SUMMARY"
-          echo '        VALIDATE INPUTS       SSH :22' >> "$GITHUB_STEP_SUMMARY"
-          echo '                                   |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                                   v' >> "$GITHUB_STEP_SUMMARY"
-          echo '                           AWS EC2 BROKER 1' >> "$GITHUB_STEP_SUMMARY"
-          echo '                           172.31.36.36' >> "$GITHUB_STEP_SUMMARY"
-          echo '                                   |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                                   v' >> "$GITHUB_STEP_SUMMARY"
-          echo '                            KAFKA :9092' >> "$GITHUB_STEP_SUMMARY"
-          echo '                                   |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                                   v' >> "$GITHUB_STEP_SUMMARY"
-          echo '                            KRaft Cluster' >> "$GITHUB_STEP_SUMMARY"
-          echo '                              /        \' >> "$GITHUB_STEP_SUMMARY"
-          echo '                             /          \' >> "$GITHUB_STEP_SUMMARY"
-          echo '                       BROKER 2      CONTROLLERS' >> "$GITHUB_STEP_SUMMARY"
-          echo '                             \          /' >> "$GITHUB_STEP_SUMMARY"
-          echo '                              \        /' >> "$GITHUB_STEP_SUMMARY"
-          echo '                               TOPIC' >> "$GITHUB_STEP_SUMMARY"
-          echo '                                 |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        +--------+--------+' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        |                 |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        v                 v' >> "$GITHUB_STEP_SUMMARY"
-          echo '                    PRODUCER          CONSUMER' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        |                 |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                        +------ MESSAGE ---+' >> "$GITHUB_STEP_SUMMARY"
-          echo '                               |' >> "$GITHUB_STEP_SUMMARY"
-          echo '                               v' >> "$GITHUB_STEP_SUMMARY"
-          echo '                         VERIFICATION' >> "$GITHUB_STEP_SUMMARY"
-
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "---" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "## 🎯 Kafka CI/CD Progression" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-
-          echo 'HEALTH CHECK' >> "$GITHUB_STEP_SUMMARY"
-          echo '     |' >> "$GITHUB_STEP_SUMMARY"
-          echo '     v' >> "$GITHUB_STEP_SUMMARY"
-          echo 'CREATE TOPIC' >> "$GITHUB_STEP_SUMMARY"
-          echo '     |' >> "$GITHUB_STEP_SUMMARY"
-          echo '     v' >> "$GITHUB_STEP_SUMMARY"
-          echo 'PRODUCER / CONSUMER TEST' >> "$GITHUB_STEP_SUMMARY"
-          echo '     |' >> "$GITHUB_STEP_SUMMARY"
-          echo '     v' >> "$GITHUB_STEP_SUMMARY"
-          echo 'TOPIC-AS-CODE' >> "$GITHUB_STEP_SUMMARY"
-          echo '     |' >> "$GITHUB_STEP_SUMMARY"
-          echo '     v' >> "$GITHUB_STEP_SUMMARY"
-          echo 'ACL-AS-CODE' >> "$GITHUB_STEP_SUMMARY"
-          echo '     |' >> "$GITHUB_STEP_SUMMARY"
-          echo '     v' >> "$GITHUB_STEP_SUMMARY"
-          echo 'SCHEMA CI/CD' >> "$GITHUB_STEP_SUMMARY"
-          echo '     |' >> "$GITHUB_STEP_SUMMARY"
-          echo '     v' >> "$GITHUB_STEP_SUMMARY"
-          echo 'KAFKA CONNECT CI/CD' >> "$GITHUB_STEP_SUMMARY"
-
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "REPORT_FILE=$REPORT"
 
 
       # ============================================================
@@ -1098,6 +1423,7 @@ jobs:
       # ============================================================
 
       - name: "11 - Upload Report"
+        id: upload_report
 
         if: always()
 
@@ -1107,6 +1433,8 @@ jobs:
 
           name: kafka-end-to-end-report
 
-          path: kafka-broker-1-health-report.txt
+          path: kafka-end-to-end-report.txt
 
           retention-days: 30
+
+          if-no-files-found: error
