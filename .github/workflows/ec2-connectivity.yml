@@ -1,15 +1,21 @@
-name: EC2 Connectivity Test
+name: Kafka Broker 1 Health Check
 
 on:
   workflow_dispatch:
 
 jobs:
 
-  connect:
+  kafka-health-check:
+
+    name: Kafka Broker 1 - Health & Topics
 
     runs-on: ubuntu-latest
 
     steps:
+
+      # --------------------------------------------------
+      # STEP 1 - Connect and collect Kafka information
+      # --------------------------------------------------
 
       - name: Connect to Kafka Broker 1
         uses: appleboy/ssh-action@v1
@@ -19,18 +25,376 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
 
           script: |
-            echo "================================="
-            echo "Connected to Kafka Broker 1"
-            echo "================================="
 
-            echo "Hostname:"
-            hostname
+            set -e
 
-            echo "User:"
-            whoami
+            KAFKA_HOME="/home/ec2-user/kafka"
+            KAFKA_BIN="$KAFKA_HOME/bin"
+            BOOTSTRAP_SERVER="172.31.36.36:9092"
 
-            echo "Private IP:"
-            hostname -I
+            REPORT="/tmp/kafka-health-report.txt"
 
-            echo "Uptime:"
-            uptime
+            echo "===================================================="
+            echo "        KAFKA BROKER 1 HEALTH CHECK"
+            echo "===================================================="
+            echo ""
+
+            echo "Creating report..."
+            rm -f "$REPORT"
+
+            {
+              echo "===================================================="
+              echo "KAFKA BROKER 1 HEALTH REPORT"
+              echo "===================================================="
+              echo ""
+
+              echo "Generated:"
+              date
+              echo ""
+
+              echo "----------------------------------------------------"
+              echo "SERVER INFORMATION"
+              echo "----------------------------------------------------"
+
+              echo "Hostname:"
+              hostname
+              echo ""
+
+              echo "User:"
+              whoami
+              echo ""
+
+              echo "Private IP:"
+              hostname -i
+              echo ""
+
+              echo "Uptime:"
+              uptime
+              echo ""
+
+              echo "----------------------------------------------------"
+              echo "KAFKA INSTALLATION"
+              echo "----------------------------------------------------"
+
+              echo "Kafka Home:"
+              echo "$KAFKA_HOME"
+              echo ""
+
+              echo "Kafka CLI:"
+              echo "$KAFKA_BIN/kafka-topics.sh"
+              echo ""
+
+              if [ -f "$KAFKA_BIN/kafka-topics.sh" ]; then
+                echo "Kafka CLI Status: AVAILABLE"
+              else
+                echo "Kafka CLI Status: NOT FOUND"
+              fi
+
+              echo ""
+
+              echo "----------------------------------------------------"
+              echo "KAFKA PROCESS CHECK"
+              echo "----------------------------------------------------"
+
+              if pgrep -f 'kafka.Kafka|kafka-server-start' > /dev/null; then
+                echo "Kafka Process Status: RUNNING"
+                echo ""
+                echo "Kafka Java Process:"
+                pgrep -af 'kafka.Kafka|kafka-server-start'
+              else
+                echo "Kafka Process Status: NOT RUNNING"
+              fi
+
+              echo ""
+
+              echo "----------------------------------------------------"
+              echo "KAFKA PORT CHECK"
+              echo "----------------------------------------------------"
+
+              echo "Listening ports:"
+              ss -lntp | grep -E ':9092|:19092' || true
+
+              echo ""
+
+              if ss -lnt | grep -q ':9092'; then
+                echo "Kafka Port 9092: LISTENING"
+              else
+                echo "Kafka Port 9092: NOT LISTENING"
+              fi
+
+              if ss -lnt | grep -q ':19092'; then
+                echo "Kafka Port 19092: LISTENING"
+              else
+                echo "Kafka Port 19092: NOT LISTENING"
+              fi
+
+              echo ""
+
+              echo "----------------------------------------------------"
+              echo "KAFKA CLUSTER CONNECTIVITY"
+              echo "----------------------------------------------------"
+
+              echo "Bootstrap Server:"
+              echo "$BOOTSTRAP_SERVER"
+              echo ""
+
+              echo "Testing Kafka..."
+              echo ""
+
+              TOPICS=$(
+                "$KAFKA_BIN/kafka-topics.sh" \
+                --list \
+                --bootstrap-server "$BOOTSTRAP_SERVER"
+              )
+
+              if [ $? -eq 0 ]; then
+                echo "Kafka Connectivity: SUCCESS"
+              else
+                echo "Kafka Connectivity: FAILED"
+              fi
+
+              echo ""
+
+              echo "----------------------------------------------------"
+              echo "KAFKA TOPICS"
+              echo "----------------------------------------------------"
+
+              echo "$TOPICS"
+
+              echo ""
+
+              TOPIC_COUNT=$(echo "$TOPICS" | sed '/^$/d' | wc -l)
+
+              echo "----------------------------------------------------"
+              echo "TOPIC COUNT"
+              echo "----------------------------------------------------"
+
+              echo "Total Kafka Topics: $TOPIC_COUNT"
+
+              echo ""
+
+              echo "===================================================="
+              echo "END OF REPORT"
+              echo "===================================================="
+
+            } | tee "$REPORT"
+
+            echo ""
+            echo "===================================================="
+            echo "REPORT LOCATION"
+            echo "===================================================="
+
+            ls -lh "$REPORT"
+
+            echo ""
+            echo "Kafka health check completed."
+
+      # --------------------------------------------------
+      # STEP 2 - Download report from EC2
+      # --------------------------------------------------
+
+      - name: Download Kafka Report
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "/tmp/kafka-health-report.txt"
+          target: "./"
+          strip_components: 2
+
+      # --------------------------------------------------
+      # STEP 3 - Rename report
+      # --------------------------------------------------
+
+      - name: Prepare Report
+        run: |
+          if [ -f kafka-health-report.txt ]; then
+            mv kafka-health-report.txt kafka-broker-1-health-report.txt
+          fi
+
+          echo "Downloaded files:"
+          ls -lh
+
+      # --------------------------------------------------
+      # STEP 4 - Display report in GitHub Actions
+      # --------------------------------------------------
+
+      - name: Display Kafka Report
+        run: |
+
+          echo "===================================================="
+          echo "          KAFKA BROKER 1 REPORT"
+          echo "===================================================="
+
+          cat kafka-broker-1-health-report.txt
+
+      # --------------------------------------------------
+      # STEP 5 - Create GitHub Actions Summary
+      # --------------------------------------------------
+
+      - name: Create GitHub Actions Summary
+        run: |
+
+          REPORT="kafka-broker-1-health-report.txt"
+
+          TOPIC_COUNT=$(grep "Total Kafka Topics:" "$REPORT" | awk '{print $4}')
+
+          KAFKA_PROCESS=$(grep "Kafka Process Status:" "$REPORT" | head -1 | cut -d: -f2- | xargs)
+
+          KAFKA_CONNECTIVITY=$(grep "Kafka Connectivity:" "$REPORT" | head -1 | cut -d: -f2- | xargs)
+
+          PORT_9092=$(grep "Kafka Port 9092:" "$REPORT" | head -1 | cut -d: -f2- | xargs)
+
+          PORT_19092=$(grep "Kafka Port 19092:" "$REPORT" | head -1 | cut -d: -f2- | xargs)
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+
+          # 🚀 Kafka Broker 1 Health Dashboard
+
+          ## 🟢 Overall Status
+
+          | Component | Status |
+          |---|---|
+          | EC2 Connectivity | 🟢 CONNECTED |
+          | Kafka Process | 🟢 $KAFKA_PROCESS |
+          | Kafka Connectivity | 🟢 $KAFKA_CONNECTIVITY |
+          | Port 9092 | 🟢 $PORT_9092 |
+          | Port 19092 | 🟢 $PORT_19092 |
+          | Kafka Topics | 📊 **$TOPIC_COUNT** |
+
+          ---
+
+          ## 🖥️ Server
+
+          | Property | Value |
+          |---|---|
+          | Hostname | \`broker1\` |
+          | Private IP | \`172.31.36.36\` |
+          | Kafka Home | \`/home/ec2-user/kafka\` |
+          | Bootstrap Server | \`172.31.36.36:9092\` |
+
+          ---
+
+          ## 🔌 Kafka Ports
+
+          \`\`\`
+          GitHub Actions
+                |
+                | SSH
+                v
+          +-----------------------+
+          |       broker1         |
+          |    172.31.36.36       |
+          +-----------------------+
+                |
+                +------ 9092 ------> Kafka
+                |
+                +------ 19092 -----> Kafka
+          \`\`\`
+
+          ---
+
+          ## 📊 Kafka Topics
+
+          \`\`\`
+          EOF
+
+          grep -A50 "KAFKA TOPICS" "$REPORT" | \
+            sed '/TOPIC COUNT/,$d' >> "$GITHUB_STEP_SUMMARY"
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          \`\`\`
+
+          ---
+
+          ## 🏗️ Kafka Architecture
+
+          \`\`\`
+                              GitHub
+                                 |
+                                 |
+                         GitHub Actions
+                                 |
+                                 | SSH
+                                 v
+                       +-------------------+
+                       |     broker1       |
+                       |  172.31.36.36     |
+                       |                   |
+                       | Kafka Broker      |
+                       +---------+---------+
+                                 |
+                    +------------+------------+
+                    |                         |
+                    v                         v
+              Kafka Broker 1            Kafka Broker 2
+              172.31.36.36             172.31.42.7
+                    |                         |
+                    +------------+------------+
+                                 |
+                              KRaft
+                                 |
+                     +-----------+-----------+
+                     |                       |
+                     v                       v
+              Controller 1             Controller 2
+              172.31.35.220            172.31.34.34
+          \`\`\`
+
+          ---
+
+          ## 🔄 CI/CD Flow
+
+          \`\`\`
+          Developer
+              |
+              v
+          GitHub
+              |
+              v
+          GitHub Actions
+              |
+              v
+          SSH → Broker 1
+              |
+              +---- Check EC2
+              |
+              +---- Check Kafka Process
+              |
+              +---- Check Ports
+              |
+              +---- Connect to Kafka
+              |
+              +---- List Topics
+              |
+              +---- Count Topics
+              |
+              v
+          Health Report
+              |
+              +---- GitHub Summary
+              |
+              +---- Job Logs
+              |
+              +---- Downloadable Artifact
+          \`\`\`
+
+          ---
+
+          ## 📄 Detailed Report
+
+          The complete broker health report is available as a downloadable workflow artifact.
+
+          EOF
+
+      # --------------------------------------------------
+      # STEP 6 - Upload downloadable artifact
+      # --------------------------------------------------
+
+      - name: Upload Kafka Health Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: kafka-broker-1-health-report
+          path: kafka-broker-1-health-report.txt
+          retention-days: 30
